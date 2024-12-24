@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>打砖块游戏</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.55.2/phaser.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+        #scoreboard {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 20px;
+        }
+        #player-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 20px;
+        }
+        #score-history {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            color: white;
+            font-size: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div id="player-info">
+        <input type="text" id="username" placeholder="请输入用户名" />
+    </div>
+    <div id="score-history">
+        <h3>Score History:</h3>
+        <ul>
+            {% for player in players %}
+                <li>{{ player.username }}: {{ player.score }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <script>
+        // 游戏配置
+        const config = { 
+            type: Phaser.AUTO,
+            width: 800,
+            height: 600,
+            scale: {
+                mode: Phaser.Scale.RESIZE,
+                autoCenter: Phaser.Scale.CENTER_BOTH
+            },
+            scene: {
+                preload,
+                create,
+                update
+            },
+            physics: {
+                default: 'arcade',
+                arcade: {
+                    gravity: false
+                },
+            }
+        };
+
+        // 创建游戏实例
+        const game = new Phaser.Game(config);
+
+        // 游戏状态变量
+        let ball, paddle, bricks, score = 0, scoreText, gameOverText, restartText, gameStarted = false;
+        let username = "";
+        let scoreSaved = false; // 添加此变量来避免重复保存分数
+
+        function preload() {
+            this.load.image('ball', '/static/images/ball.png');
+            this.load.image('brick', '/static/images/brick.png');
+            this.load.image('paddle', '/static/images/paddle.png');
+        }
+
+        // 保存分数
+        function saveScore() {
+            username = document.getElementById('username').value;
+            if (!username) { 
+                alert("请输入用户名!"); // 提示用户输入用户名
+                return; // 返回，避免继续保存
+            }
+
+            // 向服务器发送请求，检查该用户名是否已存在
+            fetch('/save_score', {
+                method: 'POST',
+                body: new URLSearchParams({
+                    username: username,
+                    score: score
+                }),
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log("Score saved successfully!"); // 在控制台显示保存成功的信息
+                } else {
+                    alert('Failed to save score');
+                }
+            });
+        }
+
+        function create() {
+            // 创建小球
+            ball = this.physics.add.image(400, 300, 'ball');
+            ball.setBounce(1, 1);
+            ball.setCollideWorldBounds(true);
+
+            // 创建挡板
+            paddle = this.physics.add.image(400, 550, 'paddle').setImmovable(true);
+
+            // 创建砖块
+            bricks = this.physics.add.staticGroup();
+            for (let i = 0; i < 5; i++) {
+                for (let j = 0; j < 4; j++) {
+                    bricks.create(150 + i * 130, 100 + j * 40, 'brick');
+                }
+            }
+
+            // 添加得分文本
+            scoreText = this.add.text(16, 16, 'Score: 0', {
+                fontSize: '32px',
+                fill: '#fff'
+            });
+
+            // 游戏开始提示文本
+            gameStartText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 50, 'Press SPACE to start', {
+                fontSize: '32px',
+                fill: '#fff'
+            }).setOrigin(0.5);
+
+            // 游戏失败文本
+            gameOverText = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY - 50, 'You Lose', {
+                fontSize: '32px',
+                fill: '#fff'
+            }).setOrigin(0.5).setVisible(false);
+
+            // 游戏重新开始按钮
+            restartButton = this.add.text(this.cameras.main.centerX, this.cameras.main.centerY + 50, 'Click to Restart', {
+                fontSize: '32px',
+                fill: '#fff'
+            }).setOrigin(0.5).setVisible(false).setInteractive();
+
+            // 设置小球与砖块的碰撞
+            this.physics.add.collider(ball, bricks, hitBrick, null, this);
+            // 设置小球与挡板的碰撞
+            this.physics.add.collider(ball, paddle, hitPaddle, null, this);
+
+            // 监听键盘输入
+            this.input.keyboard.on('keydown-SPACE', function () {
+                if (!gameStarted) {
+                    startGame.call(this); // 开始
+                } 
+            });
+
+            // 点击重新开始按钮
+            restartButton.on('pointerdown', function () {
+                restartGame.call(this); // 点击后重新开始
+            });
+        }
+
+        function startGame() {
+            username = document.getElementById('username').value;
+            if (!username) {
+                alert("请输入您的用户名以开始游戏!"); // 提示用户输入用户名
+                return; // 阻止游戏开始
+            }
+
+            gameStarted = true;
+            gameStartText.setVisible(false);
+            gameOverText.setVisible(false);
+            restartButton.setVisible(false); // 游戏开始时隐藏重新开始按钮
+            ball.setPosition(400, 300);
+            ball.setVelocity(200, 200); // 给小球设置速度
+            paddle.setPosition(400, 550);
+            this.physics.world.enable(ball);
+            this.physics.world.enable(paddle);
+        }
+
+        function update() {
+            if (!gameStarted) return; // 如果游戏尚未开始，则不进行其他更新
+
+            // 控制挡板跟随鼠标移动
+            let mouseX = this.input.x;
+            let paddleSpeed = 1000;
+            if (mouseX < paddle.x) {
+                paddle.setVelocityX(-paddleSpeed);
+            } else if (mouseX > paddle.x) {
+                paddle.setVelocityX(paddleSpeed);
+            } else {
+                paddle.setVelocityX(0);
+            }
+
+            // 检查小球是否掉落到屏幕下方，游戏失败
+            if (ball.y > config.height) {
+                gameOver.call(this);
+            }
+
+            // 检查游戏是否胜利
+            checkVictory.call(this);
+        }
+
+        // 游戏结束时的函数
+        function gameOver() {
+            ball.setVelocity(0, 0);
+            paddle.setVelocityX(0);
+
+            gameOverText.setVisible(true);
+            restartButton.setVisible(true); // 显示重新开始按钮
+            scoreText.setText('Score: ' + score);
+
+            // 提示玩家输入名字后保存分数
+            if (username && !scoreSaved) { // 检查用户名且未保存过分数
+                saveScore(); // 只有在用户名有效时才保存分数
+                scoreSaved = true; // 设置标志为 true，防止重复保存
+            } else if (!username) {
+                alert("Please enter your name before saving the score!"); // 如果没有用户名，提醒输入
+            }
+        }
+
+        // 游戏重新开始
+        function restartGame() {
+            scoreSaved = false; // 重置保存分数标志
+            score = 0;
+            scoreText.setText('Score: 0');
+            bricks.clear(true, true); // 清除现有砖块
+            for (let i = 0; i < 5; i++) {
+                for (let j = 0; j < 4; j++) {
+                    bricks.create(150 + i * 130, 100 + j * 40, 'brick');
+                }
+            }
+            startGame.call(this); // 重新开始游戏
+        }
+
+
+        // 碰撞砖块时触发的函数
+        function hitBrick(ball, brick) {
+            brick.disableBody(true, true); // 隐藏并禁用砖块
+            score += 10;
+            scoreText.setText('Score: ' + score); // 更新得分
+        }
+
+        // 碰撞挡板时触发的函数
+        function hitPaddle(ball, paddle) {
+            const diff = ball.x - paddle.x;
+            ball.setVelocityX(diff * 10);
+        }
+
+        // 检查胜利条件
+        function checkVictory() {
+            if (bricks.countActive() === 0) {
+                alert('You win!');
+                this.scene.restart();
+            }
+        }
+
+        // 显示玩家的历史记录
+        function displayHistory() {
+            fetch('/player_scores/' + username)
+            .then(response => response.json())
+            .then(data => {
+                if (data.username) {
+                    alert("Player: " + data.username + " Score: " + data.score);
+                }
+            });
+        }
+
+    </script>
+</body>
+</html>
